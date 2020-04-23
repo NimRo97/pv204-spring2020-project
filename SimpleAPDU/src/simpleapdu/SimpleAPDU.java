@@ -28,7 +28,7 @@ public class SimpleAPDU {
 
     private static byte APPLET_AID[] = {(byte) 0x00, (byte) 0xA4, (byte) 0x04, (byte) 0x00, (byte) 0x06, (byte) 0xC9, (byte) 0xAA, (byte) 0x4E, (byte) 0x15, (byte) 0xB3, (byte) 0xF6, (byte) 0x7F};
     private static CardMngr cardManager = new CardMngr();
-    private static String pin = null;
+    private static byte pinHash[] = null;
     private byte[] secretmod = new byte[33];
     private byte[] secrethash = new byte[33];
     MessageDigest hash = MessageDigest.getInstance(MessageDigest.ALG_SHA,false);
@@ -38,7 +38,8 @@ public class SimpleAPDU {
         try
         {
             SimpleAPDU main = new SimpleAPDU();
-            byte[] installData = new byte[10];
+            // Send pre-set PIN for installation.
+            byte[] installData = {(byte)0x31, (byte)0x32, (byte)0x33, (byte)0x34};
             cardManager.prepareLocalSimulatorApplet(APPLET_AID, installData, SimpleApplet.class);
 
             main.pin();
@@ -50,7 +51,7 @@ public class SimpleAPDU {
         }
     }
 
-    public void pin() throws Exception
+    private void pin() throws Exception
     {
         int attempts = 0;
         BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
@@ -60,7 +61,7 @@ public class SimpleAPDU {
         while(attempts != 4)
         {
             System.out.print("Enter PIN (HOST): ");
-            pin = br.readLine();
+            String pin = br.readLine();
 
             if(!pin.matches("^[0-9]{4}$"))
             {
@@ -71,6 +72,8 @@ public class SimpleAPDU {
             else
             {
                 attempts = 4;
+                pinHash = new byte[20];
+                hash.doFinal(pin.getBytes(), (short)0, (short)pin.getBytes().length, pinHash, (short)0);
                 ecdhchannel();
             }
         }
@@ -80,7 +83,7 @@ public class SimpleAPDU {
         System.out.println();
     }
 
-    public void ecdhchannel() throws Exception
+    private void ecdhchannel() throws Exception
     {
         //Reference https://tools.ietf.org/id/draft-irtf-cfrg-spake2-04.xml
         //Reference https://gist.github.com/wuyongzheng/0e2ed6d8a075153efcd3
@@ -98,7 +101,7 @@ public class SimpleAPDU {
         ECPoint X = HostPublic.getQ();
         BigInteger x = HostPrivate.getD();
 
-        BigInteger w = new BigInteger(pin.getBytes());
+        BigInteger w = new BigInteger(pinHash);
         ECPoint N = ecdp.getCurve().decodePoint(Hex.decode("03d8bbd6c639c62937b04d997f38c3770719c629d7014d49a24b4f98baa1292b49"));
         ECPoint M = ecdp.getCurve().decodePoint(Hex.decode("02886e2f97ace46e55ba9dd7242579f2993b64e16ef3dcab95afd497333d8fa12f"));
         ECPoint t = M.multiply(w).add(X);
@@ -128,7 +131,7 @@ public class SimpleAPDU {
         sharedsecret(secret);
     }
 
-    public void sharedsecret(byte[] secret) throws Exception
+    private void sharedsecret(byte[] secret) throws Exception
     {
         System.out.println();
         System.out.print("Shared Secret K (HOST): ");
@@ -158,7 +161,7 @@ public class SimpleAPDU {
         }
     }
 
-    public void aescommunication(byte[] secret) throws Exception
+    private void aescommunication(byte[] secret) throws Exception
     {
         int trace = 1;
         AESKey aesKeyTrial= (AESKey) KeyBuilder.buildKey(KeyBuilder.TYPE_AES, KeyBuilder.LENGTH_AES_128, false);

@@ -29,7 +29,6 @@ public class SimpleApplet extends javacard.framework.Applet
 {
     private int trace = 2;
 
-    final private static byte[] PIN = { (byte)0x31, (byte)0x32, (byte)0x33, (byte)0x34 };
     final private static byte CLA_SIMPLEAPPLET = (byte) 0xB0;
 
     private MessageDigest hash = null;
@@ -67,7 +66,9 @@ public class SimpleApplet extends javacard.framework.Applet
         decinput = JCSystem.makeTransientByteArray((short)16, JCSystem.CLEAR_ON_DESELECT);
         sentencinput = JCSystem.makeTransientByteArray((short)16, JCSystem.CLEAR_ON_DESELECT);
 
+        // Store only the hash of the PIN.
         pinHash = new byte[20];
+        hash.doFinal(buffer, offset, (short)4, pinHash, (short)0);
 
         register();
     }
@@ -147,7 +148,7 @@ public class SimpleApplet extends javacard.framework.Applet
         //Secret = y(T - wM)
         ECPoint Y = CardPublic.getQ();
         BigInteger y = CardPrivate.getD();
-        BigInteger w = new BigInteger(PIN);
+        BigInteger w = new BigInteger(pinHash);
         ECPoint N = ecdp.getCurve().decodePoint(Hex.decode("03d8bbd6c639c62937b04d997f38c3770719c629d7014d49a24b4f98baa1292b49"));
         ECPoint M = ecdp.getCurve().decodePoint(Hex.decode("02886e2f97ace46e55ba9dd7242579f2993b64e16ef3dcab95afd497333d8fa12f"));
         ECPoint T = ecdp.getCurve().decodePoint(t);
