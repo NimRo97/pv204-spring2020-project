@@ -29,7 +29,7 @@ public class SimpleApplet extends javacard.framework.Applet
 {
     private int trace = 2;
 
-    final private static byte pin[] = {0x31,0x32,0x33,0x34};
+    final private static byte[] PIN = { (byte)0x31, (byte)0x32, (byte)0x33, (byte)0x34 };
     final private static byte CLA_SIMPLEAPPLET = (byte) 0xB0;
 
     private MessageDigest hash = null;
@@ -46,28 +46,28 @@ public class SimpleApplet extends javacard.framework.Applet
     private byte[] decinput = null;
     private byte[] sentencinput = null;
 
+    private byte[] pinHash = null;
+
     protected SimpleApplet(byte[] buffer, short offset, byte length)
     {
         hash = MessageDigest.getInstance(MessageDigest.ALG_SHA,false);
-        secret = JCSystem.makeTransientByteArray((short)33, JCSystem.CLEAR_ON_DESELECT);
-        secretmod = JCSystem.makeTransientByteArray((short)33, JCSystem.CLEAR_ON_DESELECT);
-        secrethash = JCSystem.makeTransientByteArray((short)33, JCSystem.CLEAR_ON_DESELECT);
-
-        decinput = JCSystem.makeTransientByteArray((short)16, JCSystem.CLEAR_ON_DESELECT);
-        sentencinput = JCSystem.makeTransientByteArray((short)16, JCSystem.CLEAR_ON_DESELECT);
-
         curve = ECNamedCurveTable.getByName("secp256r1");
         ecdp = new ECDomainParameters(curve.getCurve(), curve.getG(), curve.getN(),
                 curve.getH(), curve.getSeed());
-
-        //Reference https://tools.ietf.org/id/draft-irtf-cfrg-spake2-04.xml
-        //Reference https://gist.github.com/wuyongzheng/0e2ed6d8a075153efcd3
         random = new SecureRandom();
         gen = new ECKeyPairGenerator();
         gen.init(new ECKeyGenerationParameters(ecdp, random));
 
         aesKey = (AESKey)KeyBuilder.buildKey(KeyBuilder.TYPE_AES, KeyBuilder.LENGTH_AES_128, false);
         aesCipher = Cipher.getInstance(Cipher.ALG_AES_BLOCK_128_CBC_NOPAD, false);
+
+        secret = JCSystem.makeTransientByteArray((short)33, JCSystem.CLEAR_ON_DESELECT);
+        secretmod = JCSystem.makeTransientByteArray((short)33, JCSystem.CLEAR_ON_DESELECT);
+        secrethash = JCSystem.makeTransientByteArray((short)33, JCSystem.CLEAR_ON_DESELECT);
+        decinput = JCSystem.makeTransientByteArray((short)16, JCSystem.CLEAR_ON_DESELECT);
+        sentencinput = JCSystem.makeTransientByteArray((short)16, JCSystem.CLEAR_ON_DESELECT);
+
+        pinHash = new byte[20];
 
         register();
     }
@@ -93,7 +93,6 @@ public class SimpleApplet extends javacard.framework.Applet
         Util.arrayFillNonAtomic(secret, (short)0, (short)secret.length, (byte)0);
         Util.arrayFillNonAtomic(secretmod, (short)0, (short)secretmod.length, (byte)0);
         Util.arrayFillNonAtomic(secrethash, (short)0, (short)secrethash.length, (byte)0);
-
         Util.arrayFillNonAtomic(decinput, (short)0, (short)decinput.length, (byte)0);
         Util.arrayFillNonAtomic(sentencinput, (short)0, (short)sentencinput.length, (byte)0);
     }
@@ -136,9 +135,11 @@ public class SimpleApplet extends javacard.framework.Applet
         byte[] apdubuf = apdu.getBuffer();
         //Receives T = X + wM
         short dataLen = apdu.getIncomingLength();
-        byte t[]=new byte[dataLen];
+        byte t[] = new byte[dataLen];
         System.arraycopy(apdubuf,ISO7816.OFFSET_CDATA, t,(short)0,dataLen);
 
+        //Reference https://tools.ietf.org/id/draft-irtf-cfrg-spake2-04
+        //Reference https://gist.github.com/wuyongzheng/0e2ed6d8a075153efcd3
         AsymmetricCipherKeyPair CardPair = gen.generateKeyPair();
         ECPublicKeyParameters CardPublic = (ECPublicKeyParameters) CardPair.getPublic();
         ECPrivateKeyParameters CardPrivate = (ECPrivateKeyParameters) CardPair.getPrivate();
@@ -146,8 +147,7 @@ public class SimpleApplet extends javacard.framework.Applet
         //Secret = y(T - wM)
         ECPoint Y = CardPublic.getQ();
         BigInteger y = CardPrivate.getD();
-        long num = Long.parseLong(new String(pin));
-        BigInteger w = BigInteger.valueOf(num);
+        BigInteger w = new BigInteger(PIN);
         ECPoint N = ecdp.getCurve().decodePoint(Hex.decode("03d8bbd6c639c62937b04d997f38c3770719c629d7014d49a24b4f98baa1292b49"));
         ECPoint M = ecdp.getCurve().decodePoint(Hex.decode("02886e2f97ace46e55ba9dd7242579f2993b64e16ef3dcab95afd497333d8fa12f"));
         ECPoint T = ecdp.getCurve().decodePoint(t);
@@ -171,10 +171,11 @@ public class SimpleApplet extends javacard.framework.Applet
         System.out.println();
 
         System.arraycopy(secret, 0, secretmod, 0, secret.length);
-        hash.doFinal(secretmod, (short)0, (short)secretmod.length, secrethash, (short)0);
+        short lenResponse = hash.doFinal(secret, (short)0, (short)secret.length, secrethash, (short)0);
 
-        Util.arrayCopyNonAtomic(secret, (short) 0, apduBuf, ISO7816.OFFSET_CDATA, (short)secret.length);
-        apdu.setOutgoingAndSend(ISO7816.OFFSET_CDATA, (short)secret.length);
+        Util.arrayCopyNonAtomic(secrethash, (short) 0, apduBuf, ISO7816.OFFSET_CDATA,
+                (short)lenResponse);
+        apdu.setOutgoingAndSend(ISO7816.OFFSET_CDATA, (short)lenResponse);
     }
 
     private void aescommunication(APDU apdu)
