@@ -40,7 +40,6 @@ public class SimpleApplet extends javacard.framework.Applet
     private Cipher aesCipher = null;
 
     private byte[] secret = null;
-    private byte[] secretmod = null;
     private byte[] secrethash = null;
     private byte[] decinput = null;
     private byte[] sentencinput = null;
@@ -61,7 +60,6 @@ public class SimpleApplet extends javacard.framework.Applet
         aesCipher = Cipher.getInstance(Cipher.ALG_AES_BLOCK_128_CBC_NOPAD, false);
 
         secret = JCSystem.makeTransientByteArray((short)33, JCSystem.CLEAR_ON_DESELECT);
-        secretmod = JCSystem.makeTransientByteArray((short)33, JCSystem.CLEAR_ON_DESELECT);
         secrethash = JCSystem.makeTransientByteArray((short)33, JCSystem.CLEAR_ON_DESELECT);
         decinput = JCSystem.makeTransientByteArray((short)16, JCSystem.CLEAR_ON_DESELECT);
         sentencinput = JCSystem.makeTransientByteArray((short)16, JCSystem.CLEAR_ON_DESELECT);
@@ -92,7 +90,6 @@ public class SimpleApplet extends javacard.framework.Applet
     private void clearData()
     {
         Util.arrayFillNonAtomic(secret, (short)0, (short)secret.length, (byte)0);
-        Util.arrayFillNonAtomic(secretmod, (short)0, (short)secretmod.length, (byte)0);
         Util.arrayFillNonAtomic(secrethash, (short)0, (short)secrethash.length, (byte)0);
         Util.arrayFillNonAtomic(decinput, (short)0, (short)decinput.length, (byte)0);
         Util.arrayFillNonAtomic(sentencinput, (short)0, (short)sentencinput.length, (byte)0);
@@ -171,10 +168,16 @@ public class SimpleApplet extends javacard.framework.Applet
         for (byte b: secret) System.out.print(String.format("%02X", b));
         System.out.println();
 
-        System.arraycopy(secret, 0, secretmod, 0, secret.length);
-        short lenResponse = hash.doFinal(secret, (short)0, (short)secret.length, secrethash, (short)0);
+        hash.doFinal(secret, (short)0, (short)secret.length, secrethash, (short)0);
 
-        Util.arrayCopyNonAtomic(secrethash, (short) 0, apduBuf, ISO7816.OFFSET_CDATA,
+        aesKey.setKey(secret, (short)0);
+        aesCipher.init(aesKey, Cipher.MODE_ENCRYPT);
+
+        byte[] secretEnc = new byte[2*16];
+        short lenResponse = aesCipher.doFinal(secret, (short)0, (short)32,
+                secretEnc, (short)0);
+
+        Util.arrayCopyNonAtomic(secretEnc, (short) 0, apduBuf, ISO7816.OFFSET_CDATA,
                 (short)lenResponse);
         apdu.setOutgoingAndSend(ISO7816.OFFSET_CDATA, (short)lenResponse);
     }
@@ -192,7 +195,7 @@ public class SimpleApplet extends javacard.framework.Applet
         for (byte b: encinput) System.out.print(String.format("%02X", b));
         System.out.println();
 
-        aesKey.setKey(secretmod,(short)0);
+        aesKey.setKey(secret,(short)0);
         aesCipher.init(aesKey, Cipher.MODE_DECRYPT);
         aesCipher.doFinal(encinput, (short)0, (short)encinput.length, decinput, (short)0);
 
@@ -207,12 +210,12 @@ public class SimpleApplet extends javacard.framework.Applet
 
         //Modifying Secret Key After Every Trace
         //Secret Key = Shift Right((Secret Key XOR Hash(Secret Key)), 1)
-        BigInteger sm = new BigInteger(secretmod);
+        BigInteger sm = new BigInteger(secret);
         BigInteger sh = new BigInteger(secrethash);
         BigInteger sk = sm.xor(sh).shiftRight(5);
-        secretmod = sk.toByteArray();
+        secret = sk.toByteArray();
 
-        aesKey.setKey(secretmod,(short)0);
+        aesKey.setKey(secret,(short)0);
         aesCipher.init(aesKey, Cipher.MODE_ENCRYPT);
         aesCipher.doFinal(input, (short)0, (short)input.length, sentencinput, (short)0);
 
@@ -221,7 +224,7 @@ public class SimpleApplet extends javacard.framework.Applet
         System.out.println();
 
         System.out.print("Secret Key (CARD): ");
-        for (byte b: secretmod) System.out.print(String.format("%02X", b));
+        for (byte b: secret) System.out.print(String.format("%02X", b));
         System.out.println();
 
         System.out.println("\n********************Trace [" + trace + "] CARD TO HOST********************\n");
@@ -231,10 +234,10 @@ public class SimpleApplet extends javacard.framework.Applet
 
         //Modifying Secret Key After Every Trace
         //Secret Key = Shift Right((Secret Key XOR Hash(Secret Key)), 1)
-        sm = new BigInteger(secretmod);
+        sm = new BigInteger(secret);
         sh = new BigInteger(secrethash);
         sk = sm.xor(sh).shiftRight(10);
-        secretmod = sk.toByteArray();
+        secret = sk.toByteArray();
 
         trace = trace + 2;
     }

@@ -18,6 +18,7 @@ import java.security.SecureRandom;
 import java.util.Arrays;
 import java.util.Random;
 import javacard.security.AESKey;
+import javacard.security.CryptoException;
 import javacard.security.KeyBuilder;
 import javacard.security.MessageDigest;
 import javacardx.crypto.Cipher;
@@ -29,9 +30,12 @@ public class SimpleAPDU {
     private static byte APPLET_AID[] = {(byte) 0x00, (byte) 0xA4, (byte) 0x04, (byte) 0x00, (byte) 0x06, (byte) 0xC9, (byte) 0xAA, (byte) 0x4E, (byte) 0x15, (byte) 0xB3, (byte) 0xF6, (byte) 0x7F};
     private static CardMngr cardManager = new CardMngr();
     private byte pinHash[] = null;
-    private byte[] secretmod = new byte[33];
-    private byte[] secrethash = new byte[33];
+    private byte[] secret = new byte[33];
+    private byte[] secrethash = new byte[20];
+
     MessageDigest hash = MessageDigest.getInstance(MessageDigest.ALG_SHA,false);
+    AESKey aesKey = (AESKey) KeyBuilder.buildKey(KeyBuilder.TYPE_AES, KeyBuilder.LENGTH_AES_128, false);
+    Cipher aesCipher = Cipher.getInstance(Cipher.ALG_AES_BLOCK_128_CBC_NOPAD, false);
 
     public static void main(String[] args)
     {
@@ -54,7 +58,6 @@ public class SimpleAPDU {
             SimpleAPDU main = new SimpleAPDU();
             main.pin();
         }
-
         catch (Exception ex)
         {
             System.out.println("Exception : " + ex);
@@ -143,12 +146,15 @@ public class SimpleAPDU {
         System.arraycopy(receivedS, (short)0, s,(short)0, (short)len);
         ECPoint S = ecdp.getCurve().decodePoint(s);
         ECPoint sec = S.subtract(N.multiply(w)).multiply(x);
-        byte[] secret = sec.getEncoded(true);
+        secret = sec.getEncoded(true);
 
-        sharedsecret(secret);
+        hash.doFinal(secret, (short)0, (short)secret.length, secrethash, (short)0);
+        aesKey.setKey(secret,(short)0);
+
+        verifysecret();
     }
 
-    private void sharedsecret(byte[] secret) throws Exception
+    private void verifysecret() throws Exception
     {
         System.out.println();
         System.out.print("Shared Secret K (HOST): ");
@@ -162,29 +168,39 @@ public class SimpleAPDU {
         getsecret[CardMngr.OFFSET_P2] = (byte) 0x00;
         getsecret[CardMngr.OFFSET_LC] = (byte) 0x00;
         byte[] response = cardManager.sendAPDUSimulator(getsecret);
-        byte[] secretHashApplet = Arrays.copyOfRange(response, 0, response.length - 2);
-        byte[] secretHashHost = new byte[20];
-        hash.doFinal(secret, (short)0, (short)secret.length, secretHashHost, (short)0);
+        byte[] appletEnc = Arrays.copyOfRange(response, 0, response.length - 2);
 
-        if(Arrays.equals(secretHashApplet, secretHashHost))
+        byte[] appletDec = new byte[33];
+        aesCipher.init(aesKey, Cipher.MODE_DECRYPT);
+        short lenDec = 0;
+
+        try
         {
-            System.out.println("\nPIN Correct. Establishing Session...");
-            aescommunication(secret);
+            lenDec = aesCipher.doFinal(appletEnc, (short)0, (short)(response.length - 2),
+                    appletDec, (short)0);
         }
-        else
+        catch (CryptoException e)
         {
-            System.out.println("\nPIN Different to the Pre-Set PIN. Exiting...");
+            System.out.println("\nPIN incorrect. Exiting...");
             System.exit(1);
         }
+
+        System.out.println(String.format("\n+++ Decrypted %d bytes: %s",
+                lenDec, CardMngr.bytesToHex(appletDec)));
+
+        if(lenDec != 32 || !Arrays.equals(appletDec, 0, 32, secret, 0, 32))
+        {
+            System.out.println("\nPIN incorrect. Exiting...");
+            System.exit(1);
+        }
+
+        System.out.println("\nPIN Correct. Establishing Session...");
+        aescommunication();
     }
 
-    private void aescommunication(byte[] secret) throws Exception
+    private void aescommunication() throws Exception
     {
         int trace = 1;
-        AESKey aesKeyTrial= (AESKey) KeyBuilder.buildKey(KeyBuilder.TYPE_AES, KeyBuilder.LENGTH_AES_128, false);
-        Cipher aesCipher = Cipher.getInstance(Cipher.ALG_AES_BLOCK_128_CBC_NOPAD, false);
-        System.arraycopy(secret, 0, secretmod, 0, secret.length);
-        hash.doFinal(secretmod, (short)0, (short)secretmod.length, secrethash, (short)0);
 
         while(trace!=11)
         {
@@ -198,8 +214,8 @@ public class SimpleAPDU {
             for (byte b: input) System.out.print(String.format("%02X", b));
             System.out.println();
 
-            aesKeyTrial.setKey(secretmod,(short)0);
-            aesCipher.init(aesKeyTrial, Cipher.MODE_ENCRYPT);
+            aesKey.setKey(secret,(short)0);
+            aesCipher.init(aesKey, Cipher.MODE_ENCRYPT);
             aesCipher.doFinal(input, (short)0, (short)input.length, encinput, (short)0);
 
             System.out.print("Encrypted Input (HOST): ");
@@ -207,7 +223,7 @@ public class SimpleAPDU {
             System.out.println();
 
             System.out.print("Secret Key (HOST): ");
-            for (byte b: secretmod) System.out.print(String.format("%02X", b));
+            for (byte b: secret) System.out.print(String.format("%02X", b));
             System.out.println();
 
             System.out.println();System.out.println("********************Trace [" + trace + "] HOST TO CARD********************");System.out.println();
@@ -224,18 +240,18 @@ public class SimpleAPDU {
 
             //Modifying Secret Key After Every Trace
             //Secret Key = Shift Right((Secret Key XOR Hash(Secret Key)), 1)
-            BigInteger sm = new BigInteger(secretmod);
+            BigInteger sm = new BigInteger(secret);
             BigInteger sh = new BigInteger(secrethash);
             BigInteger sk = sm.xor(sh).shiftRight(5);
-            secretmod = sk.toByteArray();
+            secret = sk.toByteArray();
 
             System.out.println();
             System.out.print("Encrypted Input (from CARD): ");
             for (byte b: receivedinputCard) System.out.print(String.format("%02X", b));
             System.out.println();
 
-            aesKeyTrial.setKey(secretmod,(short)0);
-            aesCipher.init(aesKeyTrial, Cipher.MODE_DECRYPT);
+            aesKey.setKey(secret,(short)0);
+            aesCipher.init(aesKey, Cipher.MODE_DECRYPT);
             aesCipher.doFinal(receivedinputCard, (short)0, (short)decinput.length, decinput, (short)0);
 
             System.out.print("Decrypted Input (from CARD): ");
@@ -244,10 +260,10 @@ public class SimpleAPDU {
 
             //Modifying Secret Key After Every Trace
             //Secret Key = Shift Right((Secret Key XOR Hash(Secret Key)), 1)
-            sm = new BigInteger(secretmod);
+            sm = new BigInteger(secret);
             sh = new BigInteger(secrethash);
             sk = sm.xor(sh).shiftRight(10);
-            secretmod = sk.toByteArray();
+            secret = sk.toByteArray();
 
             trace = trace + 2;
         }
