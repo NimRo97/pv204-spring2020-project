@@ -28,7 +28,7 @@ public class SimpleAPDU {
 
     private static byte APPLET_AID[] = {(byte) 0x00, (byte) 0xA4, (byte) 0x04, (byte) 0x00, (byte) 0x06, (byte) 0xC9, (byte) 0xAA, (byte) 0x4E, (byte) 0x15, (byte) 0xB3, (byte) 0xF6, (byte) 0x7F};
     private static CardMngr cardManager = new CardMngr();
-    private static byte pinHash[] = null;
+    private byte pinHash[] = null;
     private byte[] secretmod = new byte[33];
     private byte[] secrethash = new byte[33];
     MessageDigest hash = MessageDigest.getInstance(MessageDigest.ALG_SHA,false);
@@ -37,11 +37,21 @@ public class SimpleAPDU {
     {
         try
         {
-            SimpleAPDU main = new SimpleAPDU();
-            // Send pre-set PIN for installation.
-            byte[] installData = {(byte)0x31, (byte)0x32, (byte)0x33, (byte)0x34};
-            cardManager.prepareLocalSimulatorApplet(APPLET_AID, installData, SimpleApplet.class);
+            String presetPIN;
+            BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
 
+            System.out.println("**** Applet installation phase ****");
+            do {
+                System.out.print("Pre-set PIN on the card: ");
+                presetPIN = br.readLine();
+            } while (!validatePin(presetPIN));
+
+            // Send pre-set PIN for installation.
+            byte[] installData = presetPIN.getBytes();
+            cardManager.prepareLocalSimulatorApplet(APPLET_AID, installData, SimpleApplet.class);
+            System.out.println("Applet successfully installed.");
+
+            SimpleAPDU main = new SimpleAPDU();
             main.pin();
         }
 
@@ -51,11 +61,20 @@ public class SimpleAPDU {
         }
     }
 
+    private static boolean validatePin(String pin) {
+        if (!pin.matches("^[0-9]{4}$")) {
+            System.out.println("Invalid PIN. Exactly Four Digits Required.");
+            return false;
+        }
+
+        return true;
+    }
+
     private void pin() throws Exception
     {
+        System.out.println("\n**** Host application interaction ****");
         int attempts = 0;
         BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
-        System.out.print("PIN Set");
         System.out.println();
 
         while(attempts != 4)
@@ -63,12 +82,10 @@ public class SimpleAPDU {
             System.out.print("Enter PIN (HOST): ");
             String pin = br.readLine();
 
-            if(!pin.matches("^[0-9]{4}$"))
+            if (!validatePin(pin))
             {
-                System.out.println("Invalid PIN. Exactly Four Digits Required.");
                 attempts++;
             }
-
             else
             {
                 attempts = 4;
