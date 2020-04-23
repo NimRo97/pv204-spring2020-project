@@ -56,7 +56,7 @@ public class SimpleApplet extends javacard.framework.Applet
         decinput = JCSystem.makeTransientByteArray((short)16, JCSystem.CLEAR_ON_DESELECT);
         sentencinput = JCSystem.makeTransientByteArray((short)16, JCSystem.CLEAR_ON_DESELECT);
 
-        curve = ECNamedCurveTable.getByName("P-256");
+        curve = ECNamedCurveTable.getByName("secp256r1");
         ecdp = new ECDomainParameters(curve.getCurve(), curve.getG(), curve.getN(),
                 curve.getH(), curve.getSeed());
 
