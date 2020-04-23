@@ -82,14 +82,9 @@ public class SimpleAPDU {
     
     public void ecdhchannel() throws Exception
     {
-        byte[] dataArray1 = new byte[100];
-        javacard.framework.Util.arrayFillNonAtomic(dataArray1, (short) 0, (short) 100, (byte) 0);
-        byte[] dataArray2 = new byte[100];
-        javacard.framework.Util.arrayFillNonAtomic(dataArray2, (short) 0, (short) 100, (byte) 0);
-        
         //Reference https://tools.ietf.org/id/draft-irtf-cfrg-spake2-04.xml
         //Reference https://gist.github.com/wuyongzheng/0e2ed6d8a075153efcd3
-        X9ECParameters curve = ECNamedCurveTable.getByName("P-256");
+        X9ECParameters curve = ECNamedCurveTable.getByName("secp256r1");
         ECDomainParameters ecdp = new ECDomainParameters(curve.getCurve(), curve.getG(), curve.getN(), curve.getH(), curve.getSeed());
         
         final SecureRandom random = new SecureRandom();
